@@ -1,0 +1,261 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+<title>今日の連絡ボード</title>
+
+<!-- LIFF SDK -->
+<script src="https://static.line-scdn.net/liff/edge/2/sdk.js"></script>
+<!-- Firebase -->
+<script src="https://www.gstatic.com/firebasejs/10.12.2/firebase-app-compat.js"></script>
+<script src="https://www.gstatic.com/firebasejs/10.12.2/firebase-database-compat.js"></script>
+
+<style>
+  :root{
+    --main: #ff8a65;
+    --main-dark: #e6633a;
+    --bg: #fff7f0;
+    --card: #ffffff;
+    --text: #4a3f35;
+    --sub: #a89b8c;
+    --on: #ff8a65;
+    --off: #e0dcd6;
+  }
+  *{box-sizing:border-box;}
+  body{
+    margin:0;
+    font-family: -apple-system, BlinkMacSystemFont, "Hiragino Sans", "Yu Gothic", sans-serif;
+    background: var(--bg);
+    color: var(--text);
+    padding: 20px 16px 60px;
+  }
+  .header{
+    text-align:center;
+    margin-bottom: 20px;
+  }
+  .header h1{
+    font-size: 20px;
+    margin: 4px 0;
+  }
+  .header .date{
+    color: var(--sub);
+    font-size: 14px;
+  }
+  .card{
+    background: var(--card);
+    border-radius: 16px;
+    padding: 18px 16px;
+    margin-bottom: 14px;
+    box-shadow: 0 2px 8px rgba(0,0,0,0.05);
+  }
+  .card-label{
+    font-size: 15px;
+    font-weight: 600;
+    margin-bottom: 10px;
+    display:flex;
+    align-items:center;
+    gap:6px;
+  }
+  .toggle-row{
+    display:flex;
+    gap:10px;
+  }
+  .toggle-btn{
+    flex:1;
+    padding: 14px 0;
+    border-radius: 12px;
+    border: 2px solid var(--off);
+    background: #fff;
+    color: var(--sub);
+    font-size: 15px;
+    font-weight: 600;
+    text-align:center;
+    transition: all 0.15s;
+  }
+  .toggle-btn.active{
+    border-color: var(--main);
+    background: var(--main);
+    color: #fff;
+  }
+  .time-input{
+    width: 100%;
+    padding: 14px;
+    border-radius: 12px;
+    border: 2px solid var(--off);
+    font-size: 16px;
+    color: var(--text);
+    background: #fff;
+  }
+  .time-input:focus{
+    outline:none;
+    border-color: var(--main);
+  }
+  .last-update{
+    text-align:center;
+    color: var(--sub);
+    font-size: 12px;
+    margin-top: 18px;
+  }
+  .status{
+    text-align:center;
+    padding: 40px 0;
+    color: var(--sub);
+  }
+</style>
+</head>
+<body>
+
+<div class="header">
+  <h1>今日の連絡ボード</h1>
+  <div class="date" id="dateLabel">--</div>
+</div>
+
+<div id="app" style="display:none;">
+
+  <div class="card">
+    <div class="card-label">🍱 お弁当</div>
+    <div class="toggle-row">
+      <div class="toggle-btn" data-field="bento" data-value="need">必要</div>
+      <div class="toggle-btn" data-field="bento" data-value="noneed">不要</div>
+    </div>
+  </div>
+
+  <div class="card">
+    <div class="card-label">🍚 夕飯</div>
+    <div class="toggle-row">
+      <div class="toggle-btn" data-field="dinner" data-value="need">必要</div>
+      <div class="toggle-btn" data-field="dinner" data-value="noneed">不要</div>
+    </div>
+  </div>
+
+  <div class="card">
+    <div class="card-label">🏠 今日の帰宅時間</div>
+    <input type="time" class="time-input" id="returnTime">
+  </div>
+
+  <div class="card">
+    <div class="card-label">🚗 翌日の出発時間</div>
+    <input type="time" class="time-input" id="departTime">
+  </div>
+
+  <div class="last-update" id="lastUpdate"></div>
+</div>
+
+<div class="status" id="statusMsg">読み込み中...</div>
+
+<script>
+/* ============ 設定エリア ============ */
+// LIFF ID（LINE Developersで発行されたIDに置き換えてください）
+const LIFF_ID = "YOUR_LIFF_ID_HERE";
+
+// Firebase設定（family-todoアプリと同じプロジェクトのconfigを貼り付けてください）
+const firebaseConfig = {
+  apiKey: "YOUR_API_KEY",
+  authDomain: "family-todo-tomorrow.firebaseapp.com",
+  databaseURL: "https://family-todo-tomorrow-default-rtdb.firebaseio.com",
+  projectId: "family-todo-tomorrow",
+  storageBucket: "family-todo-tomorrow.appspot.com",
+  messagingSenderId: "YOUR_SENDER_ID",
+  appId: "YOUR_APP_ID"
+};
+/* ==================================== */
+
+firebase.initializeApp(firebaseConfig);
+const db = firebase.database();
+
+function todayKey(){
+  const d = new Date();
+  const y = d.getFullYear();
+  const m = String(d.getMonth()+1).padStart(2,'0');
+  const day = String(d.getDate()).padStart(2,'0');
+  return `${y}-${m}-${day}`;
+}
+
+function todayLabel(){
+  const d = new Date();
+  const week = ['日','月','火','水','木','金','土'][d.getDay()];
+  return `${d.getMonth()+1}月${d.getDate()}日（${week}）`;
+}
+
+let userName = "誰か";
+const dateKey = todayKey();
+const boardRef = db.ref(`dailyBoard/${dateKey}`);
+
+document.getElementById('dateLabel').textContent = todayLabel();
+
+function setActive(field, value){
+  document.querySelectorAll(`.toggle-btn[data-field="${field}"]`).forEach(btn=>{
+    btn.classList.toggle('active', btn.dataset.value === value);
+  });
+}
+
+function updateField(field, value){
+  boardRef.update({
+    [field]: value,
+    updatedBy: userName,
+    updatedAt: Date.now()
+  });
+}
+
+// トグルボタンのイベント
+document.querySelectorAll('.toggle-btn').forEach(btn=>{
+  btn.addEventListener('click', ()=>{
+    const field = btn.dataset.field;
+    const value = btn.dataset.value;
+    setActive(field, value);
+    updateField(field, value);
+  });
+});
+
+// 時刻入力のイベント
+document.getElementById('returnTime').addEventListener('change', (e)=>{
+  updateField('returnTime', e.target.value);
+});
+document.getElementById('departTime').addEventListener('change', (e)=>{
+  updateField('departTime', e.target.value);
+});
+
+// リアルタイム同期
+boardRef.on('value', (snapshot)=>{
+  const data = snapshot.val() || {};
+  if(data.bento) setActive('bento', data.bento);
+  if(data.dinner) setActive('dinner', data.dinner);
+  if(data.returnTime) document.getElementById('returnTime').value = data.returnTime;
+  if(data.departTime) document.getElementById('departTime').value = data.departTime;
+  if(data.updatedBy && data.updatedAt){
+    const t = new Date(data.updatedAt);
+    const hh = String(t.getHours()).padStart(2,'0');
+    const mm = String(t.getMinutes()).padStart(2,'0');
+    document.getElementById('lastUpdate').textContent = `最終更新：${data.updatedBy} ${hh}:${mm}`;
+  }
+});
+
+function showApp(){
+  document.getElementById('statusMsg').style.display = 'none';
+  document.getElementById('app').style.display = 'block';
+}
+
+// LIFF初期化（LINE内で開いた場合はプロフィール名を取得。ブラウザ単体テスト時はスキップ）
+if(LIFF_ID !== "YOUR_LIFF_ID_HERE"){
+  liff.init({ liffId: LIFF_ID }).then(()=>{
+    if(liff.isLoggedIn()){
+      liff.getProfile().then(profile=>{
+        userName = profile.displayName;
+        showApp();
+      });
+    } else {
+      showApp();
+    }
+  }).catch(err=>{
+    console.error('LIFF init error', err);
+    showApp();
+  });
+} else {
+  // LIFF未設定時（テスト用）
+  showApp();
+}
+</script>
+
+</body>
+</html>
