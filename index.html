@@ -3,7 +3,7 @@
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
-<title>今日の連絡ボード</title>
+<title>連絡ボード</title>
 
 <!-- LIFF SDK -->
 <script src="https://static.line-scdn.net/liff/edge/2/sdk.js"></script>
@@ -19,7 +19,6 @@
     --card: #ffffff;
     --text: #4a3f35;
     --sub: #a89b8c;
-    --on: #ff8a65;
     --off: #e0dcd6;
   }
   *{box-sizing:border-box;}
@@ -28,11 +27,11 @@
     font-family: -apple-system, BlinkMacSystemFont, "Hiragino Sans", "Yu Gothic", sans-serif;
     background: var(--bg);
     color: var(--text);
-    padding: 20px 16px 60px;
+    padding: 16px 16px 60px;
   }
   .header{
     text-align:center;
-    margin-bottom: 20px;
+    margin-bottom: 14px;
   }
   .header h1{
     font-size: 20px;
@@ -42,12 +41,48 @@
     color: var(--sub);
     font-size: 14px;
   }
+
+  /* 曜日タブ */
+  .tabs{
+    display:flex;
+    gap: 6px;
+    margin-bottom: 18px;
+  }
+  .tab{
+    flex: 1;
+    text-align:center;
+    padding: 10px 0 8px;
+    border-radius: 12px;
+    background: #fff;
+    border: 2px solid var(--off);
+    color: var(--sub);
+    font-size: 13px;
+    line-height: 1.3;
+  }
+  .tab .day-name{
+    font-weight: 700;
+    font-size: 14px;
+  }
+  .tab .day-date{
+    font-size: 11px;
+    margin-top: 2px;
+  }
+  .tab.today{
+    border-color: var(--main);
+  }
+  .tab.active{
+    background: var(--main);
+    border-color: var(--main);
+    color: #fff;
+  }
+
   .card{
     background: var(--card);
     border-radius: 16px;
     padding: 18px 16px;
     margin-bottom: 14px;
     box-shadow: 0 2px 8px rgba(0,0,0,0.05);
+    overflow: hidden;
   }
   .card-label{
     font-size: 15px;
@@ -78,19 +113,37 @@
     background: var(--main);
     color: #fff;
   }
-  .time-input{
+
+  /* 時刻入力：はみ出し対策 */
+  .time-input-wrap{
     width: 100%;
-    padding: 14px;
+    max-width: 100%;
+    overflow: hidden;
     border-radius: 12px;
     border: 2px solid var(--off);
+    background: #fff;
+  }
+  .time-input-wrap:focus-within{
+    border-color: var(--main);
+  }
+  .time-input{
+    display:block;
+    width: 100%;
+    max-width: 100%;
+    box-sizing: border-box;
+    padding: 12px 10px;
+    border: none;
+    background: transparent;
     font-size: 16px;
     color: var(--text);
-    background: #fff;
+    -webkit-appearance: none;
+    appearance: none;
+    text-align: center;
   }
   .time-input:focus{
     outline:none;
-    border-color: var(--main);
   }
+
   .last-update{
     text-align:center;
     color: var(--sub);
@@ -107,11 +160,13 @@
 <body>
 
 <div class="header">
-  <h1>今日の連絡ボード</h1>
+  <h1>連絡ボード</h1>
   <div class="date" id="dateLabel">--</div>
 </div>
 
 <div id="app" style="display:none;">
+
+  <div class="tabs" id="tabs"></div>
 
   <div class="card">
     <div class="card-label">🍱 お弁当</div>
@@ -130,13 +185,17 @@
   </div>
 
   <div class="card">
-    <div class="card-label">🏠 今日の帰宅時間</div>
-    <input type="time" class="time-input" id="returnTime">
+    <div class="card-label">🏠 帰宅時間</div>
+    <div class="time-input-wrap">
+      <input type="time" class="time-input" id="returnTime" step="600">
+    </div>
   </div>
 
   <div class="card">
     <div class="card-label">🚗 翌日の出発時間</div>
-    <input type="time" class="time-input" id="departTime">
+    <div class="time-input-wrap">
+      <input type="time" class="time-input" id="departTime" step="600">
+    </div>
   </div>
 
   <div class="last-update" id="lastUpdate"></div>
@@ -146,10 +205,8 @@
 
 <script>
 /* ============ 設定エリア ============ */
-// LIFF ID（LINE Developersで発行されたIDに置き換えてください）
 const LIFF_ID = "2010707286-obtMAVFH";
 
-// Firebase設定（family-todoアプリと同じプロジェクトのconfigを貼り付けてください）
 const firebaseConfig = {
   apiKey: "AIzaSyDHjpD3vC_bl_vEoymo1ga90Fg2dj3PdGc",
   authDomain: "family-todo-tomorrow.firebaseapp.com",
@@ -164,25 +221,59 @@ const firebaseConfig = {
 firebase.initializeApp(firebaseConfig);
 const db = firebase.database();
 
-function todayKey(){
-  const d = new Date();
+let userName = "誰か";
+let currentBoardRef = null;
+let selectedDateKey = null;
+
+function fmtKey(d){
   const y = d.getFullYear();
   const m = String(d.getMonth()+1).padStart(2,'0');
   const day = String(d.getDate()).padStart(2,'0');
   return `${y}-${m}-${day}`;
 }
 
-function todayLabel(){
-  const d = new Date();
+function fmtLabel(d){
   const week = ['日','月','火','水','木','金','土'][d.getDay()];
   return `${d.getMonth()+1}月${d.getDate()}日（${week}）`;
 }
 
-let userName = "誰か";
-const dateKey = todayKey();
-const boardRef = db.ref(`dailyBoard/${dateKey}`);
+// 今週の月〜金の日付を作る
+function getWeekDates(){
+  const today = new Date();
+  const dow = today.getDay(); // 0=日
+  const diffToMonday = dow === 0 ? -6 : 1 - dow;
+  const monday = new Date(today);
+  monday.setDate(today.getDate() + diffToMonday);
 
-document.getElementById('dateLabel').textContent = todayLabel();
+  const days = [];
+  const names = ['月','火','水','木','金'];
+  for(let i=0;i<5;i++){
+    const d = new Date(monday);
+    d.setDate(monday.getDate() + i);
+    days.push({
+      dateKey: fmtKey(d),
+      name: names[i],
+      shortDate: `${d.getMonth()+1}/${d.getDate()}`,
+      fullLabel: fmtLabel(d),
+      isToday: fmtKey(d) === fmtKey(today)
+    });
+  }
+  return days;
+}
+
+const weekDays = getWeekDates();
+
+function renderTabs(){
+  const tabsEl = document.getElementById('tabs');
+  tabsEl.innerHTML = '';
+  weekDays.forEach(day=>{
+    const el = document.createElement('div');
+    el.className = 'tab' + (day.isToday ? ' today' : '') + (day.dateKey === selectedDateKey ? ' active' : '');
+    el.innerHTML = `<div class="day-name">${day.name}</div><div class="day-date">${day.shortDate}</div>`;
+    el.addEventListener('click', ()=> selectDay(day.dateKey));
+    tabsEl.appendChild(el);
+  });
+}
 
 function setActive(field, value){
   document.querySelectorAll(`.toggle-btn[data-field="${field}"]`).forEach(btn=>{
@@ -190,15 +281,50 @@ function setActive(field, value){
   });
 }
 
+function resetBoardUI(){
+  setActive('bento', null);
+  setActive('dinner', null);
+  document.getElementById('returnTime').value = '';
+  document.getElementById('departTime').value = '';
+  document.getElementById('lastUpdate').textContent = '';
+}
+
+function selectDay(dateKey){
+  selectedDateKey = dateKey;
+  renderTabs();
+  resetBoardUI();
+
+  const dayInfo = weekDays.find(d=>d.dateKey===dateKey);
+  document.getElementById('dateLabel').textContent = dayInfo ? dayInfo.fullLabel : dateKey;
+
+  if(currentBoardRef){
+    currentBoardRef.off();
+  }
+  currentBoardRef = db.ref(`dailyBoard/${dateKey}`);
+  currentBoardRef.on('value', (snapshot)=>{
+    const data = snapshot.val() || {};
+    if(data.bento) setActive('bento', data.bento);
+    if(data.dinner) setActive('dinner', data.dinner);
+    if(data.returnTime) document.getElementById('returnTime').value = data.returnTime;
+    if(data.departTime) document.getElementById('departTime').value = data.departTime;
+    if(data.updatedBy && data.updatedAt){
+      const t = new Date(data.updatedAt);
+      const hh = String(t.getHours()).padStart(2,'0');
+      const mm = String(t.getMinutes()).padStart(2,'0');
+      document.getElementById('lastUpdate').textContent = `最終更新：${data.updatedBy} ${hh}:${mm}`;
+    }
+  });
+}
+
 function updateField(field, value){
-  boardRef.update({
+  if(!currentBoardRef) return;
+  currentBoardRef.update({
     [field]: value,
     updatedBy: userName,
     updatedAt: Date.now()
   });
 }
 
-// トグルボタンのイベント
 document.querySelectorAll('.toggle-btn').forEach(btn=>{
   btn.addEventListener('click', ()=>{
     const field = btn.dataset.field;
@@ -208,7 +334,6 @@ document.querySelectorAll('.toggle-btn').forEach(btn=>{
   });
 });
 
-// 時刻入力のイベント
 document.getElementById('returnTime').addEventListener('change', (e)=>{
   updateField('returnTime', e.target.value);
 });
@@ -216,27 +341,14 @@ document.getElementById('departTime').addEventListener('change', (e)=>{
   updateField('departTime', e.target.value);
 });
 
-// リアルタイム同期
-boardRef.on('value', (snapshot)=>{
-  const data = snapshot.val() || {};
-  if(data.bento) setActive('bento', data.bento);
-  if(data.dinner) setActive('dinner', data.dinner);
-  if(data.returnTime) document.getElementById('returnTime').value = data.returnTime;
-  if(data.departTime) document.getElementById('departTime').value = data.departTime;
-  if(data.updatedBy && data.updatedAt){
-    const t = new Date(data.updatedAt);
-    const hh = String(t.getHours()).padStart(2,'0');
-    const mm = String(t.getMinutes()).padStart(2,'0');
-    document.getElementById('lastUpdate').textContent = `最終更新：${data.updatedBy} ${hh}:${mm}`;
-  }
-});
-
 function showApp(){
   document.getElementById('statusMsg').style.display = 'none';
   document.getElementById('app').style.display = 'block';
+  renderTabs();
+  const todayEntry = weekDays.find(d=>d.isToday) || weekDays[0];
+  selectDay(todayEntry.dateKey);
 }
 
-// LIFF初期化（LINE内で開いた場合はプロフィール名を取得。ブラウザ単体テスト時はスキップ）
 if(LIFF_ID !== "YOUR_LIFF_ID_HERE"){
   liff.init({ liffId: LIFF_ID }).then(()=>{
     if(liff.isLoggedIn()){
@@ -252,7 +364,6 @@ if(LIFF_ID !== "YOUR_LIFF_ID_HERE"){
     showApp();
   });
 } else {
-  // LIFF未設定時（テスト用）
   showApp();
 }
 </script>
